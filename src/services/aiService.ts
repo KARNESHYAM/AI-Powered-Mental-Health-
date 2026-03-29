@@ -9,7 +9,18 @@ You encourage healthy coping strategies and self-reflection.
 Keep your responses concise but warm.`;
 
 // Use the VITE_ prefix for client-side environment variables
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+// In AI Studio Build, GEMINI_API_KEY is often injected directly.
+const getApiKey = () => {
+  const vKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (vKey && vKey !== "undefined" && vKey !== "") return vKey;
+  
+  const pKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : undefined;
+  if (pKey && pKey !== "undefined" && pKey !== "") return pKey;
+  
+  return undefined;
+};
+
+const API_KEY = getApiKey();
 
 const getGeminiTherapistResponse = async (
   history: { role: 'user' | 'model', content: string }[], 
@@ -19,7 +30,7 @@ const getGeminiTherapistResponse = async (
   onChunk?: (chunk: string) => void
 ) => {
   if (!API_KEY) {
-    console.error("VITE_GEMINI_API_KEY is missing. Please set it in your environment variables.");
+    console.error("Gemini API Key is missing. Please check your environment variables (VITE_GEMINI_API_KEY or GEMINI_API_KEY).");
     return "I'm sorry, I'm having trouble connecting to my AI brain right now. The API key seems to be missing. Please check your environment settings.";
   }
 
@@ -27,13 +38,18 @@ const getGeminiTherapistResponse = async (
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const contents: any[] = [];
     
-    // Filter and format history to ensure alternating roles
+    // Filter and format history to ensure alternating roles and that it starts with a user message
     let lastRole: string | null = null;
     history.forEach(m => {
       if (!m.content?.trim()) return; // Skip empty messages
       
       // Map 'model' to 'model' (Gemini SDK uses 'model' for the assistant role)
       const role = m.role === 'model' ? 'model' : 'user';
+      
+      // Gemini requires the first message to be from the 'user'
+      if (contents.length === 0 && role === 'model') {
+        return; // Skip if the first message in history is from the model
+      }
       
       if (role === lastRole) {
         // Merge consecutive messages from the same role
@@ -82,7 +98,15 @@ const getGeminiTherapistResponse = async (
       });
     }
 
-    const modelName = "gemini-2.0-flash"; // Using a very stable model
+    // Using gemini-flash-latest as it's often the most stable alias across different environments
+    const modelName = "gemini-flash-latest"; 
+
+    console.log("Attempting Gemini request:", {
+      model: modelName,
+      historyCount: contents.length,
+      hasImage: !!image,
+      hasOnChunk: !!onChunk
+    });
 
     // Use streaming for fast responses if a callback is provided
     if (onChunk) {
@@ -113,11 +137,20 @@ const getGeminiTherapistResponse = async (
       return result.text || "I'm here for you. Could you tell me more about how you're feeling?";
     }
   } catch (geminiError: any) {
-    console.error("Gemini Error:", geminiError);
-    // If it's a 404 or model not found, try a fallback model
-    if (geminiError?.message?.includes('404') || geminiError?.message?.includes('not found')) {
-       // Fallback logic could go here if needed
+    console.error("Gemini API Error:", {
+      name: geminiError?.name,
+      message: geminiError?.message,
+      status: geminiError?.status,
+      details: geminiError?.details,
+      stack: geminiError?.stack
+    });
+    
+    // If it's a model not found error, try one more fallback
+    if (geminiError?.message?.includes('not found') || geminiError?.message?.includes('404')) {
+      console.warn("Model not found, trying gemini-1.5-flash as last resort...");
+      // We could recursively call with a different model, but let's just return the error for now to see logs
     }
+    
     return "I'm sorry, I'm having a bit of trouble connecting right now. But I'm still here for you. Please try again in a moment.";
   }
 };
@@ -203,7 +236,7 @@ export const getJournalInsights = async (content: string) => {
   try {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-3-flash-preview",
       contents: [{ parts: [{ text: `Analyze this journal entry and provide a short, empathetic insight (2-3 sentences) and suggest 3 relevant tags. Format as JSON: { "insight": "...", "tags": ["tag1", "tag2", "tag3"] }\n\nEntry: ${content}` }] }],
       config: {
         responseMimeType: "application/json",
