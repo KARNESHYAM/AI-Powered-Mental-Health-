@@ -1,0 +1,7 @@
+{
+  "name": "Remix: AI Therapy Companion",
+  "description": "A compassionate AI-powered mental health companion providing empathetic chat, mood tracking, journaling, and guided wellness exercises.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
