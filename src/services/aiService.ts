@@ -8,7 +8,8 @@ You avoid giving medical diagnoses.
 You encourage healthy coping strategies and self-reflection.
 Keep your responses concise but warm.`;
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || firebaseConfig.apiKey;
+// Use the VITE_ prefix for client-side environment variables
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
 const getGeminiTherapistResponse = async (
   history: { role: 'user' | 'model', content: string }[], 
@@ -18,8 +19,8 @@ const getGeminiTherapistResponse = async (
   onChunk?: (chunk: string) => void
 ) => {
   if (!API_KEY) {
-    console.error("GEMINI_API_KEY is missing.");
-    return "I'm sorry, I'm having trouble connecting to my AI brain right now. But I'm still here to listen. How can I help you today?";
+    console.error("VITE_GEMINI_API_KEY is missing. Please set it in your environment variables.");
+    return "I'm sorry, I'm having trouble connecting to my AI brain right now. The API key seems to be missing. Please check your environment settings.";
   }
 
   try {
