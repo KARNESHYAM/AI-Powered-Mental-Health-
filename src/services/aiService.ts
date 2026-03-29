@@ -11,11 +11,18 @@ Keep your responses concise but warm.`;
 // Use the VITE_ prefix for client-side environment variables
 // In AI Studio Build, GEMINI_API_KEY is often injected directly.
 const getApiKey = () => {
+  // 1. Try VITE_ prefix (standard for client-side)
   const vKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (vKey && vKey !== "undefined" && vKey !== "") return vKey;
   
+  // 2. Try process.env (fallback for some environments)
   const pKey = typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : undefined;
   if (pKey && pKey !== "undefined" && pKey !== "") return pKey;
+  
+  // 3. Try firebaseConfig.apiKey (user provided this in a previous request)
+  if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "undefined" && firebaseConfig.apiKey !== "") {
+    return firebaseConfig.apiKey;
+  }
   
   return undefined;
 };
@@ -34,9 +41,9 @@ const getGeminiTherapistResponse = async (
     return "I'm sorry, I'm having trouble connecting to my AI brain right now. The API key seems to be missing. Please check your environment settings.";
   }
 
+  const contents: any[] = [];
   try {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
-    const contents: any[] = [];
     
     // Filter and format history to ensure alternating roles and that it starts with a user message
     let lastRole: string | null = null;
@@ -54,7 +61,13 @@ const getGeminiTherapistResponse = async (
       if (role === lastRole) {
         // Merge consecutive messages from the same role
         if (contents.length > 0) {
-          contents[contents.length - 1].parts[0].text += "\n\n" + m.content;
+          const lastContent = contents[contents.length - 1];
+          const lastPart = lastContent.parts[lastContent.parts.length - 1];
+          if (lastPart.text) {
+            lastPart.text += "\n\n" + m.content;
+          } else {
+            lastContent.parts.push({ text: m.content });
+          }
         }
         return;
       }
@@ -70,8 +83,11 @@ const getGeminiTherapistResponse = async (
     const currentParts: any[] = [];
     if (image) {
       try {
-        const base64Data = image.split(',')[1];
-        const mimeType = image.split(',')[0].split(':')[1].split(';')[0];
+        // Robust base64 extraction
+        const base64Data = image.includes(',') ? image.split(',')[1] : image;
+        const mimeTypeMatch = image.match(/^data:([^;]+);/);
+        const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : "image/png";
+        
         currentParts.push({
           inlineData: {
             data: base64Data,
@@ -82,7 +98,12 @@ const getGeminiTherapistResponse = async (
         console.error("Image processing error:", e);
       }
     }
-    currentParts.push({ text: message });
+    
+    if (message?.trim()) {
+      currentParts.push({ text: message });
+    } else if (currentParts.length === 0) {
+      currentParts.push({ text: "Please look at this image." });
+    }
     
     if (lastRole === 'user') {
       // If the last message was from user, merge the current message into it
@@ -98,8 +119,8 @@ const getGeminiTherapistResponse = async (
       });
     }
 
-    // Using gemini-flash-latest as it's often the most stable alias across different environments
-    const modelName = "gemini-flash-latest"; 
+    // Using gemini-3-flash-preview as it's the most stable for AI Studio Build
+    const modelName = "gemini-3-flash-preview"; 
 
     console.log("Attempting Gemini request:", {
       model: modelName,
@@ -147,8 +168,38 @@ const getGeminiTherapistResponse = async (
     
     // If it's a model not found error, try one more fallback
     if (geminiError?.message?.includes('not found') || geminiError?.message?.includes('404')) {
-      console.warn("Model not found, trying gemini-1.5-flash as last resort...");
-      // We could recursively call with a different model, but let's just return the error for now to see logs
+      console.warn("Model gemini-3-flash-preview not found, trying gemini-1.5-flash as fallback...");
+      try {
+        const ai = new GoogleGenAI({ apiKey: API_KEY });
+        const modelName = "gemini-1.5-flash";
+        if (onChunk) {
+          const result = await ai.models.generateContentStream({
+            model: modelName,
+            contents: contents,
+            config: {
+              systemInstruction: `${SYSTEM_PROMPT} The user's name is ${userName || 'Friend'}. Address them by name when appropriate.`,
+            }
+          });
+          let fullText = "";
+          for await (const chunk of result) {
+            const chunkText = chunk.text || "";
+            fullText += chunkText;
+            onChunk(chunkText);
+          }
+          return fullText;
+        } else {
+          const result = await ai.models.generateContent({
+            model: modelName,
+            contents: contents,
+            config: {
+              systemInstruction: `${SYSTEM_PROMPT} The user's name is ${userName || 'Friend'}. Address them by name when appropriate.`,
+            }
+          });
+          return result.text || "I'm here for you.";
+        }
+      } catch (fallbackError) {
+        console.error("Gemini Fallback Error:", fallbackError);
+      }
     }
     
     return "I'm sorry, I'm having a bit of trouble connecting right now. But I'm still here for you. Please try again in a moment.";
@@ -164,8 +215,9 @@ export const getTherapistResponse = async (
   image?: string,
   onChunk?: (chunk: string) => void
 ) => {
-  // If OpenAI is known to be broken, go straight to Gemini
-  if (skipOpenAI) {
+  // ALWAYS prioritize Gemini if onChunk is provided for a dynamic experience
+  // OR if OpenAI is known to be broken
+  if (onChunk || skipOpenAI) {
     return await getGeminiTherapistResponse(history, message, userName, image, onChunk);
   }
 
@@ -196,9 +248,6 @@ export const getTherapistResponse = async (
 
     const data = await response.json();
     const fullResponse = data.response || "I'm here for you. Could you tell me more about how you're feeling?";
-    
-    // If a chunk callback is provided, simulate a single chunk for compatibility
-    if (onChunk) onChunk(fullResponse);
     
     return fullResponse;
   } catch (error: any) {

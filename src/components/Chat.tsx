@@ -149,6 +149,11 @@ const Chat: React.FC = () => {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 1.5 * 1024 * 1024) {
+        setMicError('Image is too large. Please select an image smaller than 1.5MB.');
+        setTimeout(() => setMicError(null), 5000);
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setSelectedImage(reader.result as string);
