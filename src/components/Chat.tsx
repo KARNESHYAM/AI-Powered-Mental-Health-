@@ -15,6 +15,7 @@ const Chat: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -67,7 +68,7 @@ const Chat: React.FC = () => {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, streamingMessage]);
 
   // Speech Recognition Setup
   useEffect(() => {
@@ -268,11 +269,22 @@ const Chat: React.FC = () => {
 
       await updateDoc(doc(db, 'chatSessions', sessionId), updateData);
 
-      // Get AI response
+      // Get AI response with streaming
       const history = messages.map(m => ({ role: m.role, content: m.content }));
-      const aiResponse = await getTherapistResponse(history, userMessage, profile?.displayName || undefined, currentImage || undefined);
+      
+      setStreamingMessage("");
+      const aiResponse = await getTherapistResponse(
+        history, 
+        userMessage, 
+        profile?.displayName || undefined, 
+        currentImage || undefined,
+        (chunk) => {
+          setStreamingMessage(prev => (prev || "") + chunk);
+        }
+      );
 
-      // Save AI message
+      setStreamingMessage(null);
+      // Save AI message to Firestore
       await addDoc(collection(db, 'chatSessions', sessionId, 'messages'), {
         role: 'model',
         content: aiResponse,
@@ -441,7 +453,26 @@ const Chat: React.FC = () => {
               </motion.div>
             ))
           )}
-          {isTyping && (
+          {streamingMessage !== null && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              className="flex justify-start"
+            >
+              <div className="max-w-[85%] md:max-w-[70%] space-y-2">
+                <div className="p-5 rounded-[2rem] rounded-tl-none bg-white text-slate-800 border border-slate-100 shadow-sm">
+                  <div className="prose prose-sm max-w-none prose-p:leading-relaxed prose-p:m-0 prose-slate">
+                    <ReactMarkdown>{streamingMessage}</ReactMarkdown>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-2">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Companion</p>
+                  <span className="text-[9px] text-slate-300">Typing...</span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+          {isTyping && streamingMessage === null && (
             <div className="flex justify-start">
               <div className="bg-white p-4 rounded-[2rem] rounded-tl-none border border-slate-100 shadow-sm flex gap-1.5">
                 <span className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce" />

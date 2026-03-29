@@ -6,7 +6,7 @@ import {
   onSnapshot,
   serverTimestamp 
 } from 'firebase/firestore';
-import { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType } from './firebase';
 import { UserProfile } from './types';
 import { 
   MessageCircle, 
@@ -36,11 +36,11 @@ import LoginPage from './components/LoginPage';
 
 // Context
 interface AuthContextType {
-  user: any | null;
+  user: { uid: string } | null;
   profile: UserProfile | null;
   loading: boolean;
   isSigningIn: boolean;
-  signInWithGoogle: () => Promise<void>;
+  signInCustom: (name: string, email: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -53,60 +53,65 @@ export const useAuth = () => {
 };
 
 const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<{ uid: string } | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        const docRef = doc(db, 'users', firebaseUser.uid);
-        
-        // Real-time listener for profile changes
-        const unsubscribeProfile = onSnapshot(docRef, (doc) => {
-          if (doc.exists()) {
-            setProfile(doc.data() as UserProfile);
-          } else {
-            // Create profile if it doesn't exist
-            const newProfile: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              displayName: firebaseUser.displayName || '',
-              photoURL: firebaseUser.photoURL || '',
-              createdAt: new Date().toISOString(),
-              lastLogin: new Date().toISOString(),
-              settings: {
-                darkMode: false,
-                notifications: true
-              },
-              role: 'user'
-            };
-            setDoc(docRef, newProfile).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${firebaseUser.uid}`));
-          }
-          setLoading(false);
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
-          setLoading(false);
-        });
-
-        return () => unsubscribeProfile();
-      } else {
-        setProfile(null);
+    const storedUid = localStorage.getItem('therapy_companion_uid');
+    if (storedUid) {
+      setUser({ uid: storedUid });
+      const docRef = doc(db, 'users', storedUid);
+      
+      // Real-time listener for profile changes
+      const unsubscribeProfile = onSnapshot(docRef, (doc) => {
+        if (doc.exists()) {
+          setProfile(doc.data() as UserProfile);
+        } else {
+          // If profile doesn't exist but UID does, something is wrong
+          localStorage.removeItem('therapy_companion_uid');
+          setUser(null);
+          setProfile(null);
+        }
         setLoading(false);
-      }
-    });
+      }, (error) => {
+        console.error("Profile listener error:", error);
+        setLoading(false);
+      });
 
-    return () => unsubscribe();
+      return () => unsubscribeProfile();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
-  const signInWithGoogle = async () => {
+  const signInCustom = async (name: string, email: string) => {
     if (isSigningIn) return;
     
     setIsSigningIn(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      // Generate a simple unique ID
+      const newUid = 'user_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+      
+      const docRef = doc(db, 'users', newUid);
+      const newProfile: UserProfile = {
+        uid: newUid,
+        email: email,
+        displayName: name,
+        createdAt: new Date().toISOString(),
+        lastLogin: new Date().toISOString(),
+        settings: {
+          darkMode: false,
+          notifications: true
+        },
+        role: 'user'
+      };
+      
+      await setDoc(docRef, newProfile);
+      localStorage.setItem('therapy_companion_uid', newUid);
+      setUser({ uid: newUid });
+      setProfile(newProfile);
     } catch (error: any) {
       console.error("Sign in error:", error);
       throw error;
@@ -116,15 +121,13 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   };
 
   const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Logout error:", error);
-    }
+    localStorage.removeItem('therapy_companion_uid');
+    setUser(null);
+    setProfile(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isSigningIn, signInWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, isSigningIn, signInCustom, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -8,13 +8,21 @@ interface LoginPageProps {
 }
 
 const LoginPage: React.FC<LoginPageProps> = ({ onBack }) => {
-  const { signInWithGoogle, isSigningIn } = useAuth();
+  const { signInCustom, isSigningIn } = useAuth();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const handleGoogleSignIn = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !email.trim()) {
+      setError('Please fill in all fields.');
+      return;
+    }
+
     setError(null);
     try {
-      await signInWithGoogle();
+      await signInCustom(name, email);
     } catch (err: any) {
       setError(err.message || 'An error occurred during login.');
     }
@@ -51,35 +59,65 @@ const LoginPage: React.FC<LoginPageProps> = ({ onBack }) => {
             <Heart size={32} fill="currentColor" />
           </div>
           <h2 className="text-3xl font-bold text-slate-800 mb-2">Welcome</h2>
-          <p className="text-slate-500">Sign in to start your journey.</p>
+          <p className="text-slate-500">Enter your details to start your journey.</p>
         </div>
 
-        <div className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-700 ml-1">Full Name</label>
+            <div className="relative group">
+              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={18} />
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="John Doe"
+                className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all outline-none"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-bold text-slate-700 ml-1">Email Address</label>
+            <div className="relative group">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={18} />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="john@example.com"
+                className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all outline-none"
+                required
+              />
+            </div>
+          </div>
+
           {error && (
             <motion.p
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="text-rose-500 text-sm font-bold text-center mb-4"
+              className="text-rose-500 text-sm font-bold text-center"
             >
               {error}
             </motion.p>
           )}
 
           <button
-            onClick={handleGoogleSignIn}
+            type="submit"
             disabled={isSigningIn}
-            className="w-full py-4 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl font-bold shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-3 group disabled:opacity-50"
+            className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-xl shadow-emerald-100 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 group disabled:opacity-50 mt-4"
           >
             {isSigningIn ? (
-              <div className="w-6 h-6 border-2 border-emerald-600/30 border-t-emerald-600 rounded-full animate-spin" />
+              <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             ) : (
               <>
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-                Continue with Google
+                Start Journey
+                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
               </>
             )}
           </button>
-        </div>
+        </form>
       </motion.div>
     </div>
   );

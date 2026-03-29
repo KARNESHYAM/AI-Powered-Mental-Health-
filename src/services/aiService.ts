@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import firebaseConfig from '../../firebase-applet-config.json';
 
 const SYSTEM_PROMPT = `You are a compassionate AI mental health companion. 
 You listen carefully, respond with empathy, and provide supportive suggestions using CBT techniques (Cognitive Behavioral Therapy). 
@@ -7,12 +8,18 @@ You avoid giving medical diagnoses.
 You encourage healthy coping strategies and self-reflection.
 Keep your responses concise but warm.`;
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || firebaseConfig.apiKey;
 
-const getGeminiTherapistResponse = async (history: { role: 'user' | 'model', content: string }[], message: string, userName?: string, image?: string) => {
+const getGeminiTherapistResponse = async (
+  history: { role: 'user' | 'model', content: string }[], 
+  message: string, 
+  userName?: string, 
+  image?: string,
+  onChunk?: (chunk: string) => void
+) => {
   if (!API_KEY) {
-    console.error("GEMINI_API_KEY is missing. Please set it in your environment variables (e.g., VITE_GEMINI_API_KEY for Netlify).");
-    return "I'm sorry, I'm having trouble connecting to my AI brain right now (API key missing). But I'm still here to listen. How can I help you today?";
+    console.error("GEMINI_API_KEY is missing. Please set it in your environment variables.");
+    return "I'm sorry, I'm having trouble connecting to my AI brain right now. But I'm still here to listen. How can I help you today?";
   }
 
   try {
@@ -46,22 +53,54 @@ const getGeminiTherapistResponse = async (history: { role: 'user' | 'model', con
       parts: currentParts
     });
 
-    const result = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: contents,
-      config: {
-        systemInstruction: `${SYSTEM_PROMPT} The user's name is ${userName || 'Friend'}. Address them by name when appropriate.`,
-      }
-    });
+    // Use streaming for fast responses if a callback is provided
+    if (onChunk) {
+      const result = await ai.models.generateContentStream({
+        model: "gemini-3-flash-preview",
+        contents: contents,
+        config: {
+          systemInstruction: `${SYSTEM_PROMPT} The user's name is ${userName || 'Friend'}. Address them by name when appropriate.`,
+        }
+      });
 
-    return result.text || "I'm here for you. Could you tell me more about how you're feeling?";
+      let fullText = "";
+      for await (const chunk of result) {
+        const chunkText = chunk.text || "";
+        fullText += chunkText;
+        onChunk(chunkText);
+      }
+      return fullText;
+    } else {
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: contents,
+        config: {
+          systemInstruction: `${SYSTEM_PROMPT} The user's name is ${userName || 'Friend'}. Address them by name when appropriate.`,
+        }
+      });
+
+      return result.text || "I'm here for you. Could you tell me more about how you're feeling?";
+    }
   } catch (geminiError) {
-    console.error("Gemini Fallback Error:", geminiError);
+    console.error("Gemini Error:", geminiError);
     return "I'm sorry, I'm having a bit of trouble connecting right now. But I'm still here for you. Please try again in a moment.";
   }
 };
 
-export const getTherapistResponse = async (history: { role: 'user' | 'model', content: string }[], message: string, userName?: string, image?: string) => {
+let skipOpenAI = false;
+
+export const getTherapistResponse = async (
+  history: { role: 'user' | 'model', content: string }[], 
+  message: string, 
+  userName?: string, 
+  image?: string,
+  onChunk?: (chunk: string) => void
+) => {
+  // If OpenAI is known to be broken, go straight to Gemini
+  if (skipOpenAI) {
+    return await getGeminiTherapistResponse(history, message, userName, image, onChunk);
+  }
+
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -77,24 +116,27 @@ export const getTherapistResponse = async (history: { role: 'user' | 'model', co
 
     if (!response.ok) {
       const errorData = await response.json();
-      if (errorData.error === "OPENAI_API_KEY_MISSING") {
-        console.warn("OpenAI API key missing, using Gemini fallback.");
-        return await getGeminiTherapistResponse(history, message, userName, image);
+      const isAuthError = errorData.error === "OPENAI_API_KEY_INVALID" || errorData.error === "OPENAI_AUTH_ERROR";
+      
+      if (isAuthError) {
+        console.warn("OpenAI API key issue, falling back to Gemini and skipping OpenAI for future requests.");
+        skipOpenAI = true; // Remember to skip OpenAI for the rest of the session
+        return await getGeminiTherapistResponse(history, message, userName, image, onChunk);
       }
       throw new Error(errorData.error || "Failed to get response from AI");
     }
 
     const data = await response.json();
-    return data.response || "I'm here for you. Could you tell me more about how you're feeling?";
-  } catch (error: any) {
-    // If it's the specific OpenAI key error, we've already handled it or it's being thrown here
-    if (error.message === "OPENAI_API_KEY_MISSING") {
-      // This might happen if the error was thrown from line 62 but not caught by the if block
-      return await getGeminiTherapistResponse(history, message, userName, image);
-    }
+    const fullResponse = data.response || "I'm here for you. Could you tell me more about how you're feeling?";
     
+    // If a chunk callback is provided, simulate a single chunk for compatibility
+    if (onChunk) onChunk(fullResponse);
+    
+    return fullResponse;
+  } catch (error: any) {
     console.error("OpenAI Chat Error:", error);
-    return await getGeminiTherapistResponse(history, message, userName, image);
+    // If any error occurs, fallback to Gemini
+    return await getGeminiTherapistResponse(history, message, userName, image, onChunk);
   }
 };
 

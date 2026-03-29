@@ -11,8 +11,8 @@ let openaiClient: OpenAI | null = null;
 function getOpenAI() {
   if (!openaiClient) {
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error("OPENAI_API_KEY_MISSING");
+    if (!apiKey || apiKey.startsWith('AIza')) {
+      throw new Error("OPENAI_API_KEY_INVALID");
     }
     openaiClient = new OpenAI({ apiKey });
   }
@@ -66,12 +66,15 @@ async function startServer() {
       const aiResponse = response.choices[0].message.content;
       res.json({ response: aiResponse });
     } catch (error: any) {
-      if (error.message === "OPENAI_API_KEY_MISSING") {
-        console.warn("OpenAI API key missing for chat request. Fallback will be handled by client.");
+      if (error.message === "OPENAI_API_KEY_INVALID") {
+        res.status(401).json({ error: "OPENAI_API_KEY_INVALID", message: "OpenAI API key is missing or invalid (looks like a Firebase key)." });
+      } else if (error.status === 401 || (error.message && error.message.includes('401'))) {
+        console.warn("OpenAI Authentication Error - likely invalid key. Signaling client fallback.");
+        res.status(401).json({ error: "OPENAI_AUTH_ERROR", message: error.message });
       } else {
         console.error("OpenAI Chat Error:", error);
+        res.status(500).json({ error: error.message });
       }
-      res.status(500).json({ error: error.message });
     }
   });
 
@@ -90,12 +93,14 @@ async function startServer() {
       res.set("Content-Type", "audio/mpeg");
       res.send(buffer);
     } catch (error: any) {
-      if (error.message === "OPENAI_API_KEY_MISSING") {
-        console.warn("OpenAI API key missing for TTS request");
+      if (error.message === "OPENAI_API_KEY_INVALID") {
+        res.status(401).json({ error: "OPENAI_API_KEY_INVALID", message: "OpenAI API key is missing or invalid." });
+      } else if (error.status === 401 || (error.message && error.message.includes('401'))) {
+        res.status(401).json({ error: "OPENAI_AUTH_ERROR", message: error.message });
       } else {
         console.error("OpenAI TTS Error:", error);
+        res.status(500).json({ error: error.message });
       }
-      res.status(500).json({ error: error.message });
     }
   });
 

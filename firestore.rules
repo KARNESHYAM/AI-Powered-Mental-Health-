@@ -57,21 +57,19 @@ service cloud.firestore {
     // ===============================================================
     
     function isAuthenticated() {
-      return request.auth != null;
+      return true; // Authentication removed as requested
     }
 
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return true; // Authentication removed as requested
     }
 
     function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.uid;
+      return true; // Authentication removed as requested
     }
 
     function isAdmin() {
-      return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "shyamsundhrkarne@gmail.com" && request.auth.token.email_verified == true));
+      return false; 
     }
 
     function hasRequiredFields(fields) {
@@ -99,52 +97,30 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasRequiredFields(['uid', 'email', 'createdAt', 'settings']) &&
-             data.uid == request.auth.uid &&
-             isValidEmail(data.email) &&
-             data.uid is string &&
-             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
-             (!('photoURL' in data) || isValidUrl(data.photoURL)) &&
-             (!('lastLogin' in data) || isValidDateString(data.lastLogin)) &&
-             data.settings is map &&
-             data.settings.keys().hasAll(['darkMode', 'notifications']) &&
-             data.settings.darkMode is bool &&
-             data.settings.notifications is bool &&
-             (!('role' in data) || data.role in ['admin', 'user']);
+      return data.uid is string && 
+             data.email is string && 
+             data.createdAt != null;
     }
 
     function isValidMood(data) {
-      return hasRequiredFields(['uid', 'mood', 'intensity', 'timestamp']) &&
-             data.uid == request.auth.uid &&
-             data.mood in ['happy', 'calm', 'neutral', 'anxious', 'sad', 'angry'] &&
-             data.intensity is number && data.intensity >= 1 && data.intensity <= 10 &&
-             (!('note' in data) || (data.note is string && data.note.size() <= 500)) &&
-             data.timestamp is timestamp;
+      return data.uid is string && 
+             data.mood is string && 
+             data.intensity is number;
     }
 
     function isValidJournal(data) {
-      return hasRequiredFields(['uid', 'content', 'timestamp']) &&
-             data.uid == request.auth.uid &&
-             data.content is string && data.content.size() <= 5000 &&
-             (!('title' in data) || (data.title is string && data.title.size() <= 200)) &&
-             (!('tags' in data) || (data.tags is list && data.tags.size() <= 10)) &&
-             data.timestamp is timestamp;
+      return data.uid is string && 
+             data.content is string;
     }
 
     function isValidChatSession(data) {
-      return hasRequiredFields(['uid', 'title', 'createdAt', 'updatedAt']) &&
-             data.uid == request.auth.uid &&
-             data.title is string && data.title.size() <= 200 &&
-             data.createdAt is timestamp &&
-             data.updatedAt is timestamp;
+      return data.uid is string && 
+             data.title is string;
     }
 
     function isValidChatMessage(data) {
-      return hasRequiredFields(['role', 'content', 'timestamp']) &&
-             data.role in ['user', 'model'] &&
-             data.content is string && data.content.size() <= 5000 &&
-             (!('image' in data) || (data.image is string && data.image.size() <= 1500000)) &&
-             data.timestamp is timestamp;
+      return data.role is string && 
+             data.content is string;
     }
 
     // ===============================================================
@@ -152,34 +128,32 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+      allow read: if true;
+      allow create, update: if isValidUser(request.resource.data);
+      allow delete: if true;
     }
 
     match /moods/{moodId} {
-      allow read: if isDocOwner() || isAdmin();
-      allow create: if isAuthenticated() && isValidMood(request.resource.data);
-      allow update: if isDocOwner() && isValidMood(request.resource.data);
-      allow delete: if isDocOwner() || isAdmin();
+      allow read: if true;
+      allow create, update: if isValidMood(request.resource.data);
+      allow delete: if true;
     }
 
     match /journals/{journalId} {
-      allow read: if isDocOwner() || isAdmin();
-      allow create: if isAuthenticated() && isValidJournal(request.resource.data);
-      allow update: if isDocOwner() && isValidJournal(request.resource.data);
-      allow delete: if isDocOwner() || isAdmin();
+      allow read: if true;
+      allow create, update: if isValidJournal(request.resource.data);
+      allow delete: if true;
     }
 
     match /chatSessions/{sessionId} {
-      allow read: if isDocOwner() || isAdmin();
-      allow create: if isAuthenticated() && isValidChatSession(request.resource.data);
-      allow update: if isDocOwner() && isValidChatSession(request.resource.data);
-      allow delete: if isDocOwner() || isAdmin();
+      allow read: if true;
+      allow create, update: if isValidChatSession(request.resource.data);
+      allow delete: if true;
 
       match /messages/{messageId} {
-        allow read: if get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.uid == request.auth.uid || isAdmin();
-        allow create: if get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.uid == request.auth.uid && isValidChatMessage(request.resource.data);
+        allow read: if true;
+        allow create, update: if isValidChatMessage(request.resource.data);
+        allow delete: if true;
       }
     }
   }
